@@ -7,13 +7,28 @@ import { ExportController } from './services/ExportController';
 import { PatternData, AIAnalysis, BeadColor } from './types';
 
 import { translations, Language } from './translations';
+import { ironPresets, IronPresetKey } from './config/ironPresets';
 import { usePalette } from './context/PaletteContext';
 import { parsePaletteCSV } from './services/csvUtils';
 import { ImageCropper } from './components/ImageCropper';
+import BgMaskEditor from './components/BgMaskEditor';
 import { FreeDrawEditor } from './components/FreeDrawEditor';
+import { IronGuide } from './components/IronGuide';
 import { Icon } from '@iconify/react';
 import { Logger } from './services/logger';
 import { ApiService, StatsResponse } from './services/api';
+import { none, cartoonify, outline, mosaic } from './utils/preprocess';
+import { removeBg, compositeWhiteBg } from './utils/removeBackground';
+
+// 作品风格定义
+const ART_STYLES = [
+  { id: 'cartoon', icon: '🎨', name: '卡通风格', desc: '人像/宠物变卡通', uploadHint: '上传一张人像或宠物照片，我们将把它变成卡通拼豆' },
+  { id: 'outline', icon: '✏️', name: '轮廓风格', desc: 'LOGO/建筑/文字提取轮廓', uploadHint: '上传LOGO、建筑或文字图片，我们将提取轮廓做成拼豆' },
+  { id: 'mosaic', icon: '🧩', name: '马赛克风格', desc: '风景/抽象大色块重构', uploadHint: '上传风景或抽象图片，我们将用大色块重构画面' },
+  { id: 'original', icon: '📷', name: '原图直出', desc: '像素画/图标直接生成', uploadHint: '上传像素画或简单图标，我们将直接生成拼豆图纸' },
+] as const;
+
+type ArtStyleKey = (typeof ART_STYLES)[number]['id'];
 
 const App = () => {
   const [language, setLanguage] = useState<Language>('zh'); // Default to Chinese
@@ -27,9 +42,9 @@ const App = () => {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [isCropping, setIsCropping] = useState(false);
   
-  // Grid Dimensions State
-  const [gridWidth, setGridWidth] = useState<number>(29);
-  const [gridHeight, setGridHeight] = useState<number>(29);
+  // Grid Dimensions State - 默认 29×29
+  const [gridWidth, setGridWidth] = useState<number>(ironPresets.lightIron.gridSize);
+  const [gridHeight, setGridHeight] = useState<number>(ironPresets.lightIron.gridSize);
   const [lockRatio, setLockRatio] = useState<boolean>(true);
   const [imgAspectRatio, setImgAspectRatio] = useState<number>(1);
 
@@ -41,8 +56,23 @@ const App = () => {
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [beadShape, setBeadShape] = useState<'round' | 'square'>('square');
-  const [denoiseLevel, setDenoiseLevel] = useState<number>(0);
-  const [appliedDenoiseLevel, setAppliedDenoiseLevel] = useState<number>(0);
+  const [denoiseLevel, setDenoiseLevel] = useState<number>(ironPresets.lightIron.denoiseLevel);
+  const [appliedDenoiseLevel, setAppliedDenoiseLevel] = useState<number>(ironPresets.lightIron.denoiseLevel);
+  const [ironPreset, setIronPreset] = useState<IronPresetKey>('lightIron');
+  const [artStyle, setArtStyle] = useState<ArtStyleKey>('cartoon');
+  const [preprocessedPreview, setPreprocessedPreview] = useState<string | null>(null);
+  const [preprocessedFull, setPreprocessedFull] = useState<string | null>(null);
+
+  // 抠图状态
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [bgRemovedSrc, setBgRemovedSrc] = useState<string | null>(null); // 合成白底版（预览用）
+  const [bgRemovedTransparentSrc, setBgRemovedTransparentSrc] = useState<string | null>(null); // 透明版（微调用）
+  const [bgRemoveFailed, setBgRemoveFailed] = useState(false);
+  const [isMaskEditing, setIsMaskEditing] = useState(false);
+
+  // 生成流程状态（三步）
+  const [generationStep, setGenerationStep] = useState<'idle' | 'step1' | 'step2' | 'step3' | 'done'>('idle');
+  const [generateNotice, setGenerateNotice] = useState<string | null>(null);
 
   // Debounce Denoise Level
   useEffect(() => {
@@ -155,12 +185,97 @@ const App = () => {
         setZoom(1);
         setPan({ x: 0, y: 0 });
         setImageSrc(null); // Clear current processed image until crop is done
+        setBgRemovedSrc(null);
+        setBgRemovedTransparentSrc(null);
+        setBgRemoveFailed(false);
+        setGenerationStep('idle');
+        setGenerateNotice(null);
       };
       reader.onerror = (e) => {
         Logger.log('upload_image_error', { error: String(e.target?.error) });
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  // 加载示例图片并触发图纸生成流程
+  const handleSampleImage = async () => {
+    try {
+      const resp = await fetch('/samples/sample-cat.png');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setOriginalImageSrc(dataUrl);
+        setImageSrc(dataUrl);
+        // 重置状态，等同手动上传
+        setPatternData(null);
+        setAiAnalysis(null);
+        setHiddenBeadIds(new Set());
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+        setIsCropping(false);
+        setBgRemovedSrc(null);
+        setBgRemovedTransparentSrc(null);
+        setBgRemoveFailed(false);
+        setGenerationStep('idle');
+        setGenerateNotice(null);
+        Logger.log('load_sample_image', { source: 'sample-cat.png' });
+      };
+      reader.onerror = () => {
+        alert('示例图片读取失败');
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error('load sample image failed', err);
+      alert('示例图片加载失败');
+    }
+  };
+
+  // 智能抠图
+  const handleRemoveBg = async () => {
+    if (!imageSrc || isRemovingBg) return;
+    setIsRemovingBg(true);
+    setBgRemoveFailed(false);
+    setBgRemovedSrc(null);
+    setBgRemovedTransparentSrc(null);
+    try {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('图片加载失败'));
+        img.src = imageSrc;
+      });
+      const transparentCanvas = await removeBg(img); // 透明版
+      const whiteCanvas = compositeWhiteBg(transparentCanvas); // 合成白底版
+      setBgRemovedTransparentSrc(transparentCanvas.toDataURL('image/png'));
+      setBgRemovedSrc(whiteCanvas.toDataURL('image/png'));
+    } catch (err) {
+      console.error('remove bg failed', err);
+      setBgRemoveFailed(true);
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
+  // 手动微调确认：保存微调结果
+  const handleMaskConfirm = (resultDataUrl: string) => {
+    setBgRemovedTransparentSrc(resultDataUrl); // 透明版
+    // 合成为白底预览
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      setBgRemovedSrc(canvas.toDataURL('image/png'));
+    };
+    img.src = resultDataUrl;
+    setIsMaskEditing(false);
   };
 
   const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -227,6 +342,81 @@ const App = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageSrc]);
 
+  // 预处理预览：根据当前风格对图片做预处理，生成 200×200 预览图
+  useEffect(() => {
+    if (!imageSrc) {
+      setPreprocessedPreview(null);
+      setPreprocessedFull(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const srcW = img.width;
+        const srcH = img.height;
+        // 绘制到 canvas 获取 ImageData
+        const canvas = document.createElement('canvas');
+        canvas.width = srcW;
+        canvas.height = srcH;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, srcW, srcH);
+
+        // 根据风格调用对应预处理函数
+        let processed: ImageData;
+        switch (artStyle) {
+          case 'cartoon':
+            processed = cartoonify(imageData, srcW, srcH);
+            break;
+          case 'outline':
+            processed = outline(imageData, srcW, srcH);
+            break;
+          case 'mosaic':
+            processed = mosaic(imageData, srcW, srcH);
+            break;
+          case 'original':
+          default:
+            processed = none(imageData);
+            break;
+        }
+
+        // 生成 200×200 预览图
+        const previewCanvas = document.createElement('canvas');
+        previewCanvas.width = 200;
+        previewCanvas.height = 200;
+        const pctx = previewCanvas.getContext('2d');
+        if (!pctx) return;
+        // 将处理后的 ImageData 放回一个临时 canvas
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = srcW;
+        tmpCanvas.height = srcH;
+        const tctx = tmpCanvas.getContext('2d');
+        if (!tctx) return;
+        tctx.putImageData(processed, 0, 0);
+        // 保存完整尺寸预处理结果（供生成流程使用）
+        setPreprocessedFull(tmpCanvas.toDataURL('image/png'));
+        // 等比缩放居中绘制到 200×200
+        const scale = Math.min(200 / srcW, 200 / srcH);
+        const dw = srcW * scale;
+        const dh = srcH * scale;
+        const dx = (200 - dw) / 2;
+        const dy = (200 - dh) / 2;
+        pctx.fillStyle = '#ffffff';
+        pctx.fillRect(0, 0, 200, 200);
+        pctx.imageSmoothingEnabled = true;
+        pctx.drawImage(tmpCanvas, dx, dy, dw, dh);
+        setPreprocessedPreview(previewCanvas.toDataURL('image/png'));
+      } catch (err) {
+        console.error('preprocess preview failed', err);
+      }
+    };
+    img.src = imageSrc;
+    return () => { cancelled = true; };
+  }, [imageSrc, artStyle]);
+
   // Handle Dimension Changes
   const handleWidthChange = (val: string) => {
     const w = toPositiveInt(val, gridWidth);
@@ -244,6 +434,21 @@ const App = () => {
     }
   };
 
+  // Handle Iron Preset Selection: 更新网格大小和去杂色强度默认值（允许用户手动覆盖）
+  const handleIronPresetChange = (val: string) => {
+    const key = val as IronPresetKey;
+    if (!ironPresets[key]) return;
+    setIronPreset(key);
+    const preset = ironPresets[key];
+    setGridWidth(preset.gridSize);
+    if (lockRatio && imgAspectRatio > 0) {
+        setGridHeight(Math.max(1, Math.round(preset.gridSize / imgAspectRatio)));
+    } else {
+        setGridHeight(preset.gridSize);
+    }
+    setDenoiseLevel(preset.denoiseLevel);
+  };
+
   // Toggle Bead Visibility
   const toggleBeadVisibility = (id: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent triggering row click
@@ -258,24 +463,117 @@ const App = () => {
     });
   };
 
-  // Generate Pattern Effect (Only runs when image/dimensions change, not when editing pixels)
-  useEffect(() => {
-    if (imageSrc && gridWidth > 0 && gridHeight > 0) {
-      setIsProcessing(true);
-      const timer = setTimeout(() => {
-        processImageToPattern(imageSrc, gridWidth, gridHeight, activePalette.colors, appliedDenoiseLevel)
-          .then((data) => {
-            setPatternData(data);
-            setIsProcessing(false);
-          })
-          .catch((err) => {
-            console.error(err);
-            setIsProcessing(false);
-          });
-      }, 100); // Small delay to allow UI to update
-      return () => clearTimeout(timer);
+  // 预处理：把图片按指定风格处理，返回 dataURL（供生成流程使用）
+  const preprocessToDataUrl = (src: string, style: ArtStyleKey): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const srcW = img.width;
+          const srcH = img.height;
+          const canvas = document.createElement('canvas');
+          canvas.width = srcW;
+          canvas.height = srcH;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) throw new Error('canvas 不可用');
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, srcW, srcH);
+          let processed: ImageData;
+          switch (style) {
+            case 'cartoon':
+              processed = cartoonify(imageData, srcW, srcH);
+              break;
+            case 'outline':
+              processed = outline(imageData, srcW, srcH);
+              break;
+            case 'mosaic':
+              processed = mosaic(imageData, srcW, srcH);
+              break;
+            case 'original':
+            default:
+              processed = none(imageData);
+              break;
+          }
+          const tmp = document.createElement('canvas');
+          tmp.width = srcW;
+          tmp.height = srcH;
+          const tctx = tmp.getContext('2d');
+          if (!tctx) throw new Error('canvas 不可用');
+          tctx.putImageData(processed, 0, 0);
+          resolve(tmp.toDataURL('image/png'));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = src;
+    });
+  };
+
+  // 三步生成流程：抠图 → 预处理 → 像素化
+  const handleGenerate = async () => {
+    if (!imageSrc) return;
+    if (generationStep === 'step1' || generationStep === 'step2' || generationStep === 'step3') return;
+
+    setGenerateNotice(null);
+    setIsProcessing(true);
+
+    // ---- 第一步：抠图 ----
+    setGenerationStep('step1');
+    let workingSrc = bgRemovedSrc; // 若已有抠图结果则复用
+    if (!workingSrc) {
+      try {
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('图片加载失败'));
+          img.src = imageSrc;
+        });
+        const transparentCanvas = await removeBg(img);
+        const whiteCanvas = compositeWhiteBg(transparentCanvas);
+        workingSrc = whiteCanvas.toDataURL('image/png');
+        setBgRemovedTransparentSrc(transparentCanvas.toDataURL('image/png'));
+        setBgRemovedSrc(workingSrc);
+        setBgRemoveFailed(false);
+      } catch (err) {
+        console.error('auto remove bg failed', err);
+        workingSrc = imageSrc; // 降级为原图
+        setBgRemoveFailed(true);
+        setGenerateNotice('⚠️ 抠图失败，已使用原图生成，效果可能受影响');
+      }
     }
-  }, [imageSrc, gridWidth, gridHeight, activePalette, appliedDenoiseLevel]); // Use appliedDenoiseLevel
+
+    // ---- 第二步：预处理 ----
+    setGenerationStep('step2');
+    await new Promise((r) => setTimeout(r, 50)); // 让 UI 更新
+    let processedSrc: string = workingSrc;
+    try {
+      processedSrc = await preprocessToDataUrl(workingSrc, artStyle);
+    } catch (err) {
+      console.error('preprocess failed', err);
+      processedSrc = workingSrc; // 降级为原图
+    }
+
+    // ---- 第三步：像素化生成 ----
+    setGenerationStep('step3');
+    await new Promise((r) => setTimeout(r, 50));
+    try {
+      const data = await processImageToPattern(
+        processedSrc,
+        gridWidth,
+        gridHeight,
+        activePalette.colors,
+        appliedDenoiseLevel,
+        ironPreset
+      );
+      setPatternData(data);
+    } catch (err) {
+      console.error('generate failed', err);
+    } finally {
+      setIsProcessing(false);
+      setGenerationStep('done');
+    }
+  };
 
   const handleMaterialExport = async () => {
     if (!patternData) return;
@@ -680,8 +978,62 @@ const App = () => {
 
   const splitPreviewConfig = getSafeSplitConfig();
 
+  const [showGuide, setShowGuide] = useState(true);
+
   return (
-    <div className="min-h-screen p-4 md:p-8 flex flex-col items-center gap-6 bg-[#e0e5ec]">
+    <div className="min-h-screen p-4 md:p-8 flex flex-col items-center gap-6 bg-[#FFF0F0]">
+      {/* Guide Banner */}
+      {showGuide && (
+        <div className="w-full max-w-7xl bg-gradient-to-r from-[#FF6B6B]/10 to-[#4ECDC4]/10 rounded-2xl p-4 shadow-[4px_4px_12px_rgba(255,107,107,0.1),-4px_-4px_12px_rgba(255,255,255,0.8)] border border-[#FF6B6B]/20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🎯</span>
+            <span className="text-[#FF6B6B] font-medium">上传图片 → 选择网格大小 → 点击生成，3 步获得你的拼豆图纸</span>
+          </div>
+          <button 
+            onClick={() => setShowGuide(false)}
+            className="text-[#FF6B6B]/60 hover:text-[#FF6B6B] transition-colors p-1"
+          >
+            <Icon icon="lucide:x" className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
+      {/* 生成流程步骤指示器 */}
+      {(generationStep === 'step1' || generationStep === 'step2' || generationStep === 'step3') && (
+        <div className="w-full max-w-7xl bg-white/70 backdrop-blur rounded-2xl p-4 shadow-[4px_4px_12px_rgba(78,205,196,0.12),-4px_-4px_12px_rgba(255,255,255,0.9)] border border-[#4ECDC4]/30">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-4 h-4 border-2 border-[#4ECDC4] border-t-transparent rounded-full animate-spin"></span>
+            <span className="font-bold text-slate-700 text-sm">
+              {generationStep === 'step1' && '步骤 1/3：正在抠图...'}
+              {generationStep === 'step2' && '步骤 2/3：正在预处理...'}
+              {generationStep === 'step3' && '步骤 3/3：正在生成图纸...'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {[1, 2, 3].map((n) => {
+              const active = (generationStep === 'step1' && n === 1) ||
+                (generationStep === 'step2' && n === 2) ||
+                (generationStep === 'step3' && n === 3);
+              const done = (generationStep === 'step2' && n === 1) ||
+                (generationStep === 'step3' && (n === 1 || n === 2));
+              return (
+                <div key={n} className="flex items-center gap-2 flex-1">
+                  <div className={`h-2 flex-1 rounded-full transition-all ${active ? 'bg-[#4ECDC4]' : done ? 'bg-[#4ECDC4]/50' : 'bg-slate-200'}`}></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 抠图失败降级提示 */}
+      {generateNotice && (
+        <div className="w-full max-w-7xl bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 flex items-center gap-2">
+          <span className="text-base">⚠️</span>
+          <span className="text-sm font-medium text-orange-700">{generateNotice}</span>
+        </div>
+      )}
+
       {/* Header & Language Toggle */}
       <div className="w-full max-w-7xl flex flex-col md:flex-row justify-between items-center mb-2 gap-4">
         <div className="text-center md:text-left">
@@ -706,6 +1058,36 @@ const App = () => {
         </div>
       </div>
 
+      {/* 顶部区域：作品风格选择 */}
+      <div className="w-full max-w-7xl flex flex-col gap-3">
+        <h2 className="text-lg md:text-xl font-bold text-slate-700 flex items-center gap-2">
+          <span>🎯</span>
+          <span>第一步：选择作品风格</span>
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {ART_STYLES.map((style) => {
+            const isActive = artStyle === style.id;
+            return (
+              <button
+                key={style.id}
+                onClick={() => setArtStyle(style.id)}
+                className={`flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition-all duration-200 border-2 ${
+                  isActive
+                    ? 'border-[#FF6B6B] bg-[#FFF5F5] shadow-[0_4px_16px_rgba(255,107,107,0.25)]'
+                    : 'border-transparent bg-[#e0e5ec] hover:bg-[#e9eef5] hover:border-[#FF6B6B]/40'
+                }`}
+              >
+                <span className="text-3xl md:text-4xl leading-none">{style.icon}</span>
+                <span className={`font-bold text-sm md:text-base ${isActive ? 'text-[#FF6B6B]' : 'text-slate-700'}`}>
+                  {style.name}
+                </span>
+                <span className="text-[11px] md:text-xs text-slate-400 leading-snug">{style.desc}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Main Content Area */}
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -721,6 +1103,73 @@ const App = () => {
               <NeuFileUpload accept="image/png,image/jpeg,image/jpg,image/webp" onChange={handleFileUpload}>
                 {t.uploadImage}
               </NeuFileUpload>
+              <button
+                onClick={handleSampleImage}
+                className="mt-2 rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 hover:text-slate-800 font-bold py-3 px-4 transition-colors duration-200 flex items-center justify-center gap-2 text-sm"
+              >
+                🎨 试试示例图片
+              </button>
+              {imageSrc && (
+                <button
+                  onClick={handleRemoveBg}
+                  disabled={isRemovingBg}
+                  className={`mt-2 rounded-xl py-3 px-4 font-bold text-sm flex items-center justify-center gap-2 transition-colors duration-200 text-white ${
+                    bgRemoveFailed
+                      ? 'bg-orange-400 hover:bg-orange-500'
+                      : bgRemovedSrc
+                        ? 'bg-green-500 hover:bg-green-600'
+                        : 'bg-[#4ECDC4] hover:bg-[#3ebcb4]'
+                  } ${isRemovingBg ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  {isRemovingBg
+                    ? '⏳ 抠图中...'
+                    : bgRemoveFailed
+                      ? '⚠️ 抠图失败，点击重试'
+                      : bgRemovedSrc
+                        ? '✅ 抠图完成'
+                        : '✂️ 智能抠图'}
+                </button>
+              )}
+              {bgRemovedSrc && (
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full aspect-square rounded-lg overflow-hidden border border-slate-300 bg-white">
+                      <img src={imageSrc} alt="原图" className="w-full h-full object-contain" />
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">原图</span>
+                  </div>
+                  <div className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-[#4ECDC4]/60 bg-white">
+                      <img src={bgRemovedSrc} alt="抠图结果" className="w-full h-full object-contain" />
+                    </div>
+                    <span className="text-[10px] font-bold text-[#4ECDC4]">抠图后</span>
+                  </div>
+                </div>
+              )}
+              {bgRemovedSrc && (
+                <p className="mt-1 text-xs font-bold text-green-600">背景已移除 ✓</p>
+              )}
+              {bgRemovedSrc && (
+                <button
+                  onClick={() => setIsMaskEditing(true)}
+                  className="mt-1 w-full rounded-xl py-2.5 px-4 bg-white border-2 border-slate-300 text-slate-600 hover:text-slate-800 hover:border-slate-400 font-bold text-sm flex items-center justify-center gap-2 transition-colors duration-200"
+                >
+                  <Icon icon="lucide:pencil" className="w-4 h-4" /> 手动微调
+                </button>
+              )}
+              <p className="mt-2 text-xs text-[#4ECDC4] font-medium leading-snug">
+                {ART_STYLES.find((s) => s.id === artStyle)?.uploadHint}
+              </p>
+              {preprocessedPreview && (
+                <div className="mt-3 flex flex-col items-center gap-1.5">
+                  <div className="w-[200px] h-[200px] rounded-xl overflow-hidden border-2 border-[#4ECDC4]/40 bg-white flex items-center justify-center shadow-sm">
+                    <img src={preprocessedPreview} alt="预处理预览" className="w-full h-full object-contain" />
+                  </div>
+                  <span className="text-[11px] font-bold text-[#4ECDC4]">
+                    预处理预览（{ART_STYLES.find((s) => s.id === artStyle)?.name}）
+                  </span>
+                </div>
+              )}
             </div>
 
             {imageSrc && (
@@ -764,6 +1213,22 @@ const App = () => {
                        </button>
                      )}
                    </div>
+                </div>
+
+                {/* Iron Preset Selector */}
+                <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-slate-400 uppercase ml-2">🔥 烫法选择</label>
+                    <NeuSelect
+                        value={ironPreset}
+                        onChange={(e) => handleIronPresetChange(e.target.value)}
+                    >
+                        {(Object.keys(ironPresets) as IronPresetKey[]).map((key) => (
+                            <option key={key} value={key}>
+                                {ironPresets[key].label} — {ironPresets[key].description}
+                            </option>
+                        ))}
+                    </NeuSelect>
+                    <p className="text-[11px] text-slate-400 ml-2">不同烫法生成不同图纸，请根据成品用途选择</p>
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -907,6 +1372,24 @@ const App = () => {
                     )}
                   </NeuButton>
                 </div>
+
+                {/* 生成图纸主按钮 */}
+                <div className="pt-2">
+                  <button
+                    onClick={handleGenerate}
+                    disabled={isProcessing || generationStep === 'step1' || generationStep === 'step2' || generationStep === 'step3'}
+                    className="w-full rounded-2xl py-4 text-white font-bold text-base flex items-center justify-center gap-2 transition-all duration-200 shadow-[4px_4px_12px_rgba(255,107,107,0.3),-4px_-4px_12px_rgba(255,255,255,0.9)] bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] hover:opacity-90 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isProcessing ? (
+                      <span className="animate-pulse">⏳ 生成中...</span>
+                    ) : (
+                      <>
+                        <Icon icon="lucide:wand-2" className="w-5 h-5" />
+                        生成拼豆图纸
+                      </>
+                    )}
+                  </button>
+                </div>
               </>
             )}
           </NeuCard>
@@ -999,8 +1482,8 @@ const App = () => {
         </div>
 
         {/* Right Column: Canvas Preview */}
-        <div className="lg:col-span-8 flex flex-col gap-6 order-1 lg:order-2 h-full">
-          <NeuCard className="flex-1 min-h-[500px] flex items-center justify-center relative overflow-hidden p-0 bg-slate-200/50" >
+        <div className="lg:col-span-8 flex flex-col gap-6 order-1 lg:order-2 lg:self-start lg:sticky lg:top-6">
+          <NeuCard className="w-full h-[calc(100vh-240px)] min-h-[420px] flex items-center justify-center relative overflow-hidden p-0 bg-slate-200/50" >
             {!imageSrc ? (
                <div className="flex flex-col items-center gap-4 text-slate-400 p-8">
                  <Icon icon="lucide:image" className="w-24 h-24 opacity-20" />
@@ -1038,8 +1521,13 @@ const App = () => {
                         {/* Processing Overlay */}
                         {isProcessing && (
                             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-200/50 backdrop-blur-sm rounded-lg animate-in fade-in duration-200">
-                                <div className="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin shadow-lg"></div>
-                                <span className="mt-4 font-bold text-slate-600 animate-pulse">{t.processing}</span>
+                                <div className="w-12 h-12 border-4 border-[#4ECDC4] border-t-transparent rounded-full animate-spin shadow-lg"></div>
+                                <span className="mt-4 font-bold text-slate-600 animate-pulse">
+                                    {generationStep === 'step1' ? '步骤 1/3：正在抠图...' :
+                                     generationStep === 'step2' ? '步骤 2/3：正在预处理...' :
+                                     generationStep === 'step3' ? '步骤 3/3：正在生成图纸...' :
+                                     t.processing}
+                                </span>
                             </div>
                         )}
                         {/* Checkerboard background for transparency */}
@@ -1052,10 +1540,24 @@ const App = () => {
                     </div>
                  </div>
                  
-                 {/* Original Image Thumbnail */}
-                 <div className="absolute bottom-4 right-4 w-20 h-20 p-1 bg-white/50 backdrop-blur-sm rounded-lg shadow-lg transform hover:scale-110 transition-transform duration-300 z-20 pointer-events-none">
-                    <img src={imageSrc} className="w-full h-full object-cover rounded" alt="Original" />
+                 {/* 三图展示：左上角原图 / 右上角抠图后 / 居中图纸 */}
+                 {/* Original Image Thumbnail (左上角) */}
+                 <div className="absolute top-4 left-4 z-20 flex flex-col items-center gap-1 pointer-events-none">
+                    <div className="w-20 h-20 p-1 bg-white/60 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200">
+                       <img src={imageSrc} className="w-full h-full object-cover rounded" alt="Original" />
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-500 bg-white/60 px-1.5 py-0.5 rounded">原图</span>
                  </div>
+                 
+                 {/* Removed-Bg Thumbnail (右上角) */}
+                 {bgRemovedSrc && (
+                    <div className="absolute top-4 right-4 z-20 flex flex-col items-center gap-1 pointer-events-none">
+                       <div className="w-28 h-28 p-1 bg-white/70 backdrop-blur-sm rounded-lg shadow-lg border-2 border-[#4ECDC4]/50">
+                          <img src={bgRemovedSrc} className="w-full h-full object-cover rounded" alt="抠图结果" />
+                       </div>
+                       <span className="text-[10px] font-bold text-[#4ECDC4] bg-white/70 px-1.5 py-0.5 rounded">抠图后</span>
+                    </div>
+                 )}
                  
                  {/* Reset View Button */}
                  {(zoom !== 1 || pan.x !== 0 || pan.y !== 0) && (
@@ -1070,6 +1572,11 @@ const App = () => {
               </div>
             )}
           </NeuCard>
+
+          {/* Iron Guide */}
+          {imageSrc && (
+            <IronGuide ironMethod={ironPreset} />
+          )}
 
           {/* Action Footer */}
           {patternData && (
@@ -1106,6 +1613,11 @@ const App = () => {
                  <span className="truncate">{t.download}</span>
                </NeuButton>
              </div>
+          )}
+
+          {/* Iron Guide */}
+          {imageSrc && (
+             <IronGuide ironMethod={ironPreset} />
           )}
         </div>
       </div>
@@ -1355,48 +1867,33 @@ const App = () => {
       </NeuModal>
 
       {/* Footer */}
-      <footer className="w-full max-w-7xl flex flex-col md:flex-row justify-between items-center gap-4 mt-12 pb-8 text-slate-500 border-t border-slate-300/50 pt-8">
-        <div className="flex items-center gap-4 text-sm font-medium">
-          <a href="https://blog.str1ct.top/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 flex items-center gap-2 transition-colors">
-             <Icon icon="lucide:book-open" className="w-5 h-5" />
-             <span>{t.footerBlog}</span>
-          </a>
-          <span className="text-slate-300">•</span>
-          <a href="https://github.com/pengGgxp/PerlerGen" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 flex items-center gap-2 transition-colors">
-            <Icon icon="lucide:github" className="w-5 h-5" />
-            <span>{t.footerOpenSource}</span>
-          </a>
-          <span className="text-slate-300">•</span>
-          <a href="https://github.com/pengGgxp/PerlerGen" target="_blank" rel="noopener noreferrer" className="hover:text-yellow-500 flex items-center gap-1 transition-colors">
-             <Icon icon="lucide:star" className="w-4 h-4" />
-             {t.footerStar}
-          </a>
-          
-          {stats && (
-            <>
-              <span className="text-slate-300 hidden md:inline">•</span>
-              <div className="flex items-center gap-3 text-xs md:text-sm">
-                <span title="Today's Visits" className="flex items-center gap-1">
-                  <Icon icon="lucide:users" className="w-4 h-4" />
-                  {t.todayVisits || "今日"}: {stats.today}
-                </span>
-                <span className="text-slate-300">/</span>
-                <span title="Total Visits" className="flex items-center gap-1">
-                  <Icon icon="lucide:bar-chart-2" className="w-4 h-4" />
-                  {t.totalVisits || "总计"}: {stats.total}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-        
-        <NeuButton 
-          onClick={() => setShowDonationModal(true)}
-          className="!px-5 !py-2 text-sm flex items-center gap-2 font-bold text-slate-600 hover:text-pink-500"
-        >
-          <Icon icon="lucide:coffee" className="w-4 h-4" /> {t.footerBuyMeCoffee}
-        </NeuButton>
+      <footer className="w-full max-w-7xl flex flex-col items-center gap-2 mt-12 pb-8 pt-8">
+        <p className="text-[14px] text-[#999] text-center">
+          © 2026 小若拼豆 | 让每一颗豆子都有灵魂
+        </p>
       </footer>
+
+      {/* 抠图手动微调编辑器 */}
+      {isMaskEditing && bgRemovedTransparentSrc && imageSrc && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-[#FFF5F5] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden border border-[#FF6B6B]/10">
+            <div className="flex justify-between items-center p-5 border-b border-slate-300">
+              <h3 className="text-xl font-bold text-slate-700">✏️ 手动微调抠图</h3>
+              <button onClick={() => setIsMaskEditing(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <Icon icon="lucide:x" className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto custom-scrollbar">
+              <BgMaskEditor
+                originalSrc={imageSrc}
+                removedSrc={bgRemovedTransparentSrc}
+                onConfirm={handleMaskConfirm}
+                onCancel={() => setIsMaskEditing(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

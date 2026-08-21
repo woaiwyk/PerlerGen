@@ -2,12 +2,14 @@ import React, { ReactNode, useRef } from 'react';
 import { Icon } from '@iconify/react';
 
 // Common base styles
-const BASE_BG = 'bg-[#e0e5ec]';
-const TEXT_COLOR = 'text-slate-600';
+const BASE_BG = 'bg-[#FFF5F5]';
+const TEXT_COLOR = 'text-[#FF6B6B]';
+const ACCENT_COLOR = 'text-[#4ECDC4]';
 
-// Shadow styles
-const SHADOW_OUT = 'shadow-[9px_9px_16px_rgb(163,177,198,0.6),-9px_-9px_16px_rgba(255,255,255,0.5)]';
-const SHADOW_IN = 'shadow-[inset_6px_6px_10px_0_rgba(163,177,198,0.7),inset_-6px_-6px_10px_0_rgba(255,255,255,0.8)]';
+// Shadow styles - 珊瑚粉和薄荷绿主题
+const SHADOW_OUT = 'shadow-[6px_6px_12px_rgba(255,107,107,0.15),-6px_-6px_12px_rgba(255,255,255,0.8)]';
+const SHADOW_IN = 'shadow-[inset_4px_4px_8px_0_rgba(255,107,107,0.1),inset_-4px_-4px_8px_0_rgba(255,255,255,0.9)]';
+const ACCENT_SHADOW = 'shadow-[4px_4px_8px_rgba(78,205,196,0.2),-4px_-4px_8px_rgba(255,255,255,0.7)]';
 
 interface Props {
   children?: ReactNode;
@@ -29,8 +31,9 @@ export const NeuButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> &
     className={`
       ${BASE_BG} 
       ${active ? SHADOW_IN : SHADOW_OUT} 
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'active:shadow-[inset_4px_4px_8px_0_rgba(163,177,198,0.7),inset_-4px_-4px_8px_0_rgba(255,255,255,0.8)] transform active:scale-[0.98]'}
-      rounded-full px-3 py-1.5 md:px-6 md:py-2 font-bold ${TEXT_COLOR} transition-all duration-200
+      ${disabled ? 'opacity-50 cursor-not-allowed' : 'active:shadow-[inset_4px_4px_8px_0_rgba(255,107,107,0.15),inset_-4px_-4px_8px_0_rgba(255,255,255,0.9)] transform active:scale-[0.98]'}
+      rounded-full px-3 py-1.5 md:px-6 md:py-2 font-bold text-[#FF6B6B] transition-all duration-200
+      border-2 border-transparent hover:border-[#FF6B6B]/20
       ${className}
     `}
   >
@@ -43,9 +46,9 @@ export const NeuInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (
     {...props}
     className={`
       ${BASE_BG} ${SHADOW_IN}
-      rounded-xl px-4 py-3 outline-none ${TEXT_COLOR}
-      focus:ring-2 focus:ring-slate-300 transition-all
-      placeholder-slate-400
+      rounded-xl px-4 py-3 outline-none text-[#FF6B6B]
+      focus:ring-2 focus:ring-[#FF6B6B]/30 transition-all
+      placeholder-[#FF6B6B]/40
       ${props.className}
     `}
   />
@@ -58,12 +61,12 @@ export const NeuSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> 
       className={`
         appearance-none w-full
         ${BASE_BG} ${SHADOW_IN}
-        rounded-xl px-4 py-3 outline-none ${TEXT_COLOR}
-        focus:ring-2 focus:ring-slate-300 transition-all
+        rounded-xl px-4 py-3 outline-none text-[#FF6B6B]
+        focus:ring-2 focus:ring-[#FF6B6B]/30 transition-all
         cursor-pointer
       `}
     />
-    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
+    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[#FF6B6B]/60">
       <Icon icon="lucide:chevron-down" className="h-4 w-4" />
     </div>
   </div>
@@ -81,7 +84,7 @@ export const NeuRange: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { 
       <input
         type="range"
         {...props}
-        className="w-full h-2 bg-transparent appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-slate-400 [&::-webkit-slider-thumb]:shadow-md"
+        className="w-full h-2 bg-transparent appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#FF6B6B] [&::-webkit-slider-thumb]:shadow-md"
       />
     </div>
   </div>
@@ -104,8 +107,8 @@ export const NeuFileUpload: React.FC<{ onChange: (e: React.ChangeEvent<HTMLInput
           rounded-xl p-6 cursor-pointer
           flex flex-col items-center justify-center gap-3
           hover:transform hover:-translate-y-1 transition-all duration-300
-          active:shadow-[inset_4px_4px_8px_0_rgba(163,177,198,0.7),inset_-4px_-4px_8px_0_rgba(255,255,255,0.8)] active:translate-y-0
-          border-2 border-transparent hover:border-slate-200
+          active:shadow-[inset_4px_4px_8px_0_rgba(255,107,107,0.15),inset_-4px_-4px_8px_0_rgba(255,255,255,0.9)] active:translate-y-0
+          border-2 border-transparent hover:border-[#FF6B6B]/30
           group
         `}
       >
@@ -115,10 +118,10 @@ export const NeuFileUpload: React.FC<{ onChange: (e: React.ChangeEvent<HTMLInput
           accept={accept}
           className="hidden"
         />
-        <div className="p-3 rounded-full bg-[#e0e5ec] shadow-[inset_4px_4px_8px_0_rgba(163,177,198,0.7),inset_-4px_-4px_8px_0_rgba(255,255,255,0.8)] group-hover:shadow-[9px_9px_16px_rgb(163,177,198,0.6),-9px_-9px_16px_rgba(255,255,255,0.5)] transition-all duration-300">
-          <Icon icon="lucide:upload" className="w-8 h-8 text-slate-500 group-hover:text-slate-600 group-hover:scale-110 transition-all" />
+        <div className="p-3 rounded-full bg-[#FFF5F5] shadow-[inset_4px_4px_8px_0_rgba(255,107,107,0.1),inset_-4px_-4px_8px_0_rgba(255,255,255,0.9)] group-hover:shadow-[6px_6px_12px_rgba(255,107,107,0.15),-6px_-6px_12px_rgba(255,255,255,0.8)] transition-all duration-300">
+          <Icon icon="lucide:upload" className="w-8 h-8 text-[#FF6B6B] group-hover:text-[#FF5252] group-hover:scale-110 transition-all" />
         </div>
-        <span className="font-bold text-slate-500 group-hover:text-slate-700">{children || 'Upload File'}</span>
+        <span className="font-bold text-[#FF6B6B]/70 group-hover:text-[#FF6B6B]">{children || 'Upload File'}</span>
       </label>
     </div>
   );
@@ -127,8 +130,8 @@ export const NeuFileUpload: React.FC<{ onChange: (e: React.ChangeEvent<HTMLInput
 export const NeuModal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: ReactNode }> = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-800/30 backdrop-blur-sm">
-      <div className="bg-[#e0e5ec] rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#FF6B6B]/20 backdrop-blur-sm">
+      <div className="bg-[#FFF5F5] rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out] border border-[#FF6B6B]/10">
         <div className="flex justify-between items-center p-6 border-b border-slate-300">
           <h3 className="text-xl font-bold text-slate-700">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">

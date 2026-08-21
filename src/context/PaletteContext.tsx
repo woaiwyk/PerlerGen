@@ -26,7 +26,7 @@ export const PaletteProvider: React.FC<{ children: ReactNode }> = ({ children })
   });
 
   const [selectedPaletteId, setSelectedPaletteId] = useState<string>(() => {
-     return localStorage.getItem('selected_palette_id') || AVAILABLE_PALETTES[0].id;
+     return localStorage.getItem('selected_palette_id') || 'mard_221';
   });
 
   // Save to localStorage whenever they change

@@ -107,8 +107,8 @@ export const translations = {
     totalVisits: "Total Visits",
   },
   zh: {
-    appTitle: "拼豆生成器",
-    subtitle: "智能像素画转换与设计工具",
+    appTitle: "小若的拼豆图纸生成器",
+    subtitle: "让每一颗豆子都有灵魂",
     config: "参数设置",
     uploadImage: "上传图片",
     palette: "选择色卡",

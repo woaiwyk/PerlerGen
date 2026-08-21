@@ -18,14 +18,14 @@ export { hexToRgb, getColorDistance } from "./beads/utils";
 
 export const AVAILABLE_PALETTES: Palette[] = [
   {
-    id: "mard_291",
-    name: "Mard Beads (291 Colors) / M豆291色",
-    colors: MARD_291_COLORS,
-  },
-  {
     id: "mard_221",
     name: "Mard Beads (221 Colors) / M豆221色",
     colors: MARD_221_COLORS,
+  },
+  {
+    id: "mard_291",
+    name: "Mard Beads (291 Colors) / M豆291色",
+    colors: MARD_291_COLORS,
   },
   {
     id: "mard_264",
