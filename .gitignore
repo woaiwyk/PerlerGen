@@ -25,3 +25,8 @@ dist-ssr
 generate_beads.py
 .wrangler/
 .dev.vars
+
+# 验证用临时图片（非功能资源，未被代码引用）
+public/test-*.jpg
+public/test-*.png
+public/test-dog.png
