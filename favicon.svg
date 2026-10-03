@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <style>
+    circle { stroke: rgba(0,0,0,0.1); stroke-width: 1; }
+  </style>
+  <!-- Background to match neumorphism or transparent -->
+  <rect width="100" height="100" rx="20" fill="#e0e5ec" />
+  
+  <!-- 4 Beads -->
+  <circle cx="35" cy="35" r="15" fill="#FF6B6B" />
+  <circle cx="65" cy="35" r="15" fill="#4ECDC4" />
+  <circle cx="35" cy="65" r="15" fill="#FFE66D" />
+  <circle cx="65" cy="65" r="15" fill="#45B7D1" />
+</svg>

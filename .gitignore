@@ -1,0 +1,10 @@
+# gh-pages 分支只保留构建产物
+*
+!index.html
+!favicon.svg
+!alipay.jpg
+!assets/
+!assets/**
+!samples/
+!samples/**
+!.gitignore
