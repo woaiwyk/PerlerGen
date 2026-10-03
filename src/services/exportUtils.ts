@@ -15,7 +15,7 @@ const drawWatermark = (
   const text =
     typeof window !== "undefined" && window.location.hostname
       ? window.location.hostname
-      : "PerlerGen";
+      : "PeterWu";
   ctx.fillText(text, width - 15, height - 15);
   ctx.restore();
 };
@@ -165,7 +165,7 @@ export const drawPatternToCanvas = (
       ctx.lineWidth = 1;
       ctx.strokeRect(x * cellSize, y * cellSize, cellSize, cellSize);
 
-      if (!hiddenBeadIds.has(bead.id)) {
+      if (bead && !hiddenBeadIds.has(bead.id)) {
         ctx.fillStyle = bead.hex;
         if (beadShape === "round") {
           // Draw Circular Bead

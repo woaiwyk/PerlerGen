@@ -4,7 +4,7 @@ export type TranslationMap = typeof translations.en;
 
 export const translations = {
   en: {
-    appTitle: "PerlerGen",
+    appTitle: "PeterWu",
     subtitle: "Magic Pixel Art Generator",
     config: "Config",
     uploadImage: "Image Source",
